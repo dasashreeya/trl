@@ -36,6 +36,7 @@ from trl.trainer.utils import (
     adjusted_mfu,
     compute_flops_per_token,
     compute_mfu,
+    create_model_from_path,
     entropy_from_logits,
     flush_left,
     generate_model_card,
@@ -264,6 +265,26 @@ class TestHashModule(TrlTestCase):
 
 
 @require_peft
+class TestCreateModelFromPath(TrlTestCase):
+    # MPS must not default to device_map="auto": with the float32 default, loading a bf16
+    # checkpoint hits https://github.com/huggingface/transformers/issues/48029.
+    @pytest.mark.parametrize(
+        "device_type, kwargs, expected_device_map",
+        [("cpu", {}, None), ("mps", {}, None), ("cuda", {}, "auto"), ("mps", {"device_map": "auto"}, "auto")],
+    )
+    def test_device_map_default(self, device_type, kwargs, expected_device_map):
+        with (
+            patch("trl.trainer.utils.PartialState") as mock_state,
+            patch.object(AutoModelForCausalLM, "from_pretrained") as mock_from_pretrained,
+        ):
+            mock_state.return_value.device.type = device_type
+            create_model_from_path(
+                "trl-internal-testing/tiny-Qwen3ForCausalLM", architecture=AutoModelForCausalLM, **kwargs
+            )
+
+        assert mock_from_pretrained.call_args.kwargs["device_map"] == expected_device_map
+
+
 class TestGetPEFTConfig(TrlTestCase):
     def test_create_peft_config_use_peft_false(self):
         """Test that when use_peft is False, the function returns None."""
